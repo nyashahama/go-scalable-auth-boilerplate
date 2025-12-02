@@ -431,7 +431,7 @@ For issues and questions:
 
 - 🐛 [Report bugs](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
 - 💡 [Request features](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
-- 📖 [Documentation](https://github.com/nyashahama/user-auth-app/wiki)
+- 📖 [Documentation](https://github.com/nyashahama/go-scalable-auth-boilerplate/wiki)
 
 ## 🗺️ Roadmap
 
