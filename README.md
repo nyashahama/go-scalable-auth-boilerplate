@@ -31,7 +31,7 @@ A production-ready Go authentication service template with JWT authentication, P
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/nyashahama/user-auth-app.git
+git clone https://github.com/nyashahama/go-scalable-auth-boilerplate.git
 cd user-auth-app
 ```
 
@@ -429,8 +429,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For issues and questions:
 
-- 🐛 [Report bugs](https://github.com/nyashahama/user-auth-app/issues)
-- 💡 [Request features](https://github.com/nyashahama/user-auth-app/issues)
+- 🐛 [Report bugs](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
+- 💡 [Request features](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
 - 📖 [Documentation](https://github.com/nyashahama/user-auth-app/wiki)
 
 ## 🗺️ Roadmap
