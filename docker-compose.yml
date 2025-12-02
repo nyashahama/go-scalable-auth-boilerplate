@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auth_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: dbname
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: auth_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2-alpine
+    container_name: auth_nats
+    ports:
+      - "4222:4222"
+      - "8222:8222" # HTTP monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: auth_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: postgres://postgres:admin@postgres:5432/dbname?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 8080
+      LOG_LEVEL: info
+      TIMEOUT_SECONDS: 30
+      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
+      ENVIRONMENT: development
+      ALLOWED_ORIGINS: "*"
+      RATE_LIMIT_RPS: 10
+      RATE_LIMIT_BURST: 20
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
