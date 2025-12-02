@@ -1,3 +1,4 @@
+// Package domain
 package domain
 
 import "github.com/jackc/pgx/v5/pgtype"
