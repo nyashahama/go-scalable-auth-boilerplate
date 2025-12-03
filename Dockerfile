@@ -1,10 +1,7 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24 AS builder
 
 WORKDIR /app
-
-# Install build dependencies
-RUN apk add --no-cache git
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -16,10 +13,15 @@ COPY . .
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api cmd/api/main.go
 
-# Runtime stage
-FROM alpine:latest
+# Runtime stage - CHANGED FROM alpine:latest TO debian:12-slim
+FROM debian:12-slim
 
-RUN apk --no-cache add ca-certificates
+# Install SSL certificates (different package manager)
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
 
 WORKDIR /root/
 
