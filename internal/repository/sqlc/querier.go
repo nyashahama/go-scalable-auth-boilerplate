@@ -9,9 +9,27 @@ import (
 )
 
 type Querier interface {
+	CountUsers(ctx context.Context) (int64, error)
+	// Audit log queries
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
+	// Session queries
+	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	// User queries
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	DeactivateUser(ctx context.Context, id int32) error
+	DeleteExpiredSessions(ctx context.Context) error
+	DeleteSession(ctx context.Context, id string) error
+	DeleteUserSessions(ctx context.Context, userID int32) error
+	GetSession(ctx context.Context, id string) (Session, error)
+	GetUserAuditLogs(ctx context.Context, arg GetUserAuditLogsParams) ([]AuditLog, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int32) (GetUserByIDRow, error)
+	GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error)
+	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error
+	UpdateUserLastLogin(ctx context.Context, id int32) error
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	VerifyUserEmail(ctx context.Context, id int32) error
 }
 
 var _ Querier = (*Queries)(nil)

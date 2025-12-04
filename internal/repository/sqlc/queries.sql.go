@@ -11,10 +11,91 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users WHERE is_active = TRUE
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createAuditLog = `-- name: CreateAuditLog :exec
+
+INSERT INTO audit_logs (user_id, action, resource, details, ip_address)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type CreateAuditLogParams struct {
+	UserID    pgtype.Int4 `json:"user_id"`
+	Action    string      `json:"action"`
+	Resource  pgtype.Text `json:"resource"`
+	Details   []byte      `json:"details"`
+	IpAddress pgtype.Text `json:"ip_address"`
+}
+
+// Audit log queries
+func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error {
+	_, err := q.db.Exec(ctx, createAuditLog,
+		arg.UserID,
+		arg.Action,
+		arg.Resource,
+		arg.Details,
+		arg.IpAddress,
+	)
+	return err
+}
+
+const createSession = `-- name: CreateSession :one
+
+INSERT INTO sessions (id, user_id, token_hash, expires_at, ip_address, user_agent)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, expires_at, created_at
+`
+
+type CreateSessionParams struct {
+	ID        string           `json:"id"`
+	UserID    int32            `json:"user_id"`
+	TokenHash string           `json:"token_hash"`
+	ExpiresAt pgtype.Timestamp `json:"expires_at"`
+	IpAddress pgtype.Text      `json:"ip_address"`
+	UserAgent pgtype.Text      `json:"user_agent"`
+}
+
+type CreateSessionRow struct {
+	ID        string           `json:"id"`
+	UserID    int32            `json:"user_id"`
+	ExpiresAt pgtype.Timestamp `json:"expires_at"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+// Session queries
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error) {
+	row := q.db.QueryRow(ctx, createSession,
+		arg.ID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+		arg.IpAddress,
+		arg.UserAgent,
+	)
+	var i CreateSessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
+
 INSERT INTO users (username, email, password_hash, role)
 VALUES ($1, $2, $3, $4)
-RETURNING id, username, email, role, created_at
+RETURNING id, username, email, role, created_at, updated_at, is_active, email_verified
 `
 
 type CreateUserParams struct {
@@ -25,13 +106,17 @@ type CreateUserParams struct {
 }
 
 type CreateUserRow struct {
-	ID        int32            `json:"id"`
-	Username  string           `json:"username"`
-	Email     string           `json:"email"`
-	Role      string           `json:"role"`
-	CreatedAt pgtype.Timestamp `json:"created_at"`
+	ID            int32            `json:"id"`
+	Username      string           `json:"username"`
+	Email         string           `json:"email"`
+	Role          string           `json:"role"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	IsActive      bool             `json:"is_active"`
+	EmailVerified bool             `json:"email_verified"`
 }
 
+// User queries
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Username,
@@ -46,14 +131,118 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.Email,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsActive,
+		&i.EmailVerified,
 	)
 	return i, err
 }
 
+const deactivateUser = `-- name: DeactivateUser :exec
+UPDATE users
+SET is_active = FALSE
+WHERE id = $1
+`
+
+func (q *Queries) DeactivateUser(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, deactivateUser, id)
+	return err
+}
+
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions WHERE expires_at <= NOW()
+`
+
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteExpiredSessions)
+	return err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions WHERE id = $1
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteSession, id)
+	return err
+}
+
+const deleteUserSessions = `-- name: DeleteUserSessions :exec
+DELETE FROM sessions WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int32) error {
+	_, err := q.db.Exec(ctx, deleteUserSessions, userID)
+	return err
+}
+
+const getSession = `-- name: GetSession :one
+SELECT id, user_id, token_hash, expires_at, created_at, ip_address, user_agent
+FROM sessions
+WHERE id = $1 AND expires_at > NOW()
+`
+
+func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
+	row := q.db.QueryRow(ctx, getSession, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.IpAddress,
+		&i.UserAgent,
+	)
+	return i, err
+}
+
+const getUserAuditLogs = `-- name: GetUserAuditLogs :many
+SELECT id, user_id, action, resource, details, ip_address, created_at
+FROM audit_logs
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type GetUserAuditLogsParams struct {
+	UserID pgtype.Int4 `json:"user_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
+}
+
+func (q *Queries) GetUserAuditLogs(ctx context.Context, arg GetUserAuditLogsParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, getUserAuditLogs, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Action,
+			&i.Resource,
+			&i.Details,
+			&i.IpAddress,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, email, password_hash, role, created_at
+SELECT id, username, email, password_hash, role, created_at, updated_at, last_login, is_active, email_verified
 FROM users
-WHERE email = $1
+WHERE email = $1 AND is_active = TRUE
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -66,22 +255,30 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.PasswordHash,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLogin,
+		&i.IsActive,
+		&i.EmailVerified,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, email, role, created_at
+SELECT id, username, email, role, created_at, updated_at, last_login, is_active, email_verified
 FROM users
-WHERE id = $1
+WHERE id = $1 AND is_active = TRUE
 `
 
 type GetUserByIDRow struct {
-	ID        int32            `json:"id"`
-	Username  string           `json:"username"`
-	Email     string           `json:"email"`
-	Role      string           `json:"role"`
-	CreatedAt pgtype.Timestamp `json:"created_at"`
+	ID            int32            `json:"id"`
+	Username      string           `json:"username"`
+	Email         string           `json:"email"`
+	Role          string           `json:"role"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	LastLogin     pgtype.Timestamp `json:"last_login"`
+	IsActive      bool             `json:"is_active"`
+	EmailVerified bool             `json:"email_verified"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id int32) (GetUserByIDRow, error) {
@@ -93,6 +290,154 @@ func (q *Queries) GetUserByID(ctx context.Context, id int32) (GetUserByIDRow, er
 		&i.Email,
 		&i.Role,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLogin,
+		&i.IsActive,
+		&i.EmailVerified,
 	)
 	return i, err
+}
+
+const getUserByUsername = `-- name: GetUserByUsername :one
+SELECT id, username, email, role, created_at, updated_at, last_login, is_active, email_verified
+FROM users
+WHERE username = $1 AND is_active = TRUE
+`
+
+type GetUserByUsernameRow struct {
+	ID            int32            `json:"id"`
+	Username      string           `json:"username"`
+	Email         string           `json:"email"`
+	Role          string           `json:"role"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	LastLogin     pgtype.Timestamp `json:"last_login"`
+	IsActive      bool             `json:"is_active"`
+	EmailVerified bool             `json:"email_verified"`
+}
+
+func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
+	row := q.db.QueryRow(ctx, getUserByUsername, username)
+	var i GetUserByUsernameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLogin,
+		&i.IsActive,
+		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, email, role, created_at, updated_at, last_login, is_active, email_verified
+FROM users
+WHERE is_active = TRUE
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListUsersParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+type ListUsersRow struct {
+	ID            int32            `json:"id"`
+	Username      string           `json:"username"`
+	Email         string           `json:"email"`
+	Role          string           `json:"role"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	LastLogin     pgtype.Timestamp `json:"last_login"`
+	IsActive      bool             `json:"is_active"`
+	EmailVerified bool             `json:"email_verified"`
+}
+
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Email,
+			&i.Role,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastLogin,
+			&i.IsActive,
+			&i.EmailVerified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateUserEmail = `-- name: UpdateUserEmail :exec
+UPDATE users
+SET email = $1
+WHERE id = $2
+`
+
+type UpdateUserEmailParams struct {
+	Email string `json:"email"`
+	ID    int32  `json:"id"`
+}
+
+func (q *Queries) UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error {
+	_, err := q.db.Exec(ctx, updateUserEmail, arg.Email, arg.ID)
+	return err
+}
+
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users
+SET last_login = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, updateUserLastLogin, id)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $1
+WHERE id = $2
+`
+
+type UpdateUserPasswordParams struct {
+	PasswordHash string `json:"password_hash"`
+	ID           int32  `json:"id"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.PasswordHash, arg.ID)
+	return err
+}
+
+const verifyUserEmail = `-- name: VerifyUserEmail :exec
+UPDATE users
+SET email_verified = TRUE
+WHERE id = $1
+`
+
+func (q *Queries) VerifyUserEmail(ctx context.Context, id int32) error {
+	_, err := q.db.Exec(ctx, verifyUserEmail, id)
+	return err
 }

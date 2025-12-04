@@ -1,8 +1,9 @@
-// Package server
+// Package server implements the HTTP server
 package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,109 +11,188 @@ import (
 	"time"
 
 	"user-auth-app/internal/config"
-	"user-auth-app/internal/handlers"
+	"user-auth-app/internal/handler"
 	"user-auth-app/internal/middleware"
-	"user-auth-app/internal/repository"
-	"user-auth-app/internal/services"
+	"user-auth-app/internal/service"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 var (
 	requestsTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{Name: "http_requests_total", Help: "Total requests"},
-		[]string{"path", "method"},
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"path", "method", "status"},
 	)
+
 	requestDuration = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{Name: "http_request_duration_seconds", Help: "Request latency"},
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "HTTP request latency in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
 		[]string{"path", "method"},
 	)
 )
 
 type Server struct {
-	httpServer *http.Server
-	pool       *pgxpool.Pool
+	httpServer    *http.Server
+	config        *config.Config
+	logger        *zerolog.Logger
+	authHandler   *handler.AuthHandler
+	healthHandler *handler.HealthHandler
+	authService   service.AuthService
 }
 
-func NewServer(cfg *config.Config) *Server {
-	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-	logger := zerolog.New(output).With().Timestamp().Logger()
-
-	logLevel, err := zerolog.ParseLevel(cfg.LogLevel)
-	if err != nil {
-		logLevel = zerolog.InfoLevel
-		logger.Warn().Str("log_level", cfg.LogLevel).Msg("Invalid log level, defaulting to Info")
+// NewServer creates a new HTTP server
+func NewServer(
+	cfg *config.Config,
+	logger *zerolog.Logger,
+	authHandler *handler.AuthHandler,
+	healthHandler *handler.HealthHandler,
+	authService service.AuthService,
+) *Server {
+	return &Server{
+		config:        cfg,
+		logger:        logger,
+		authHandler:   authHandler,
+		healthHandler: healthHandler,
+		authService:   authService,
 	}
-	zerolog.SetGlobalLevel(logLevel)
-	pool, err := pgxpool.New(context.Background(), cfg.DBURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to DB")
+}
+
+// Start starts the HTTP server with graceful shutdown
+func (s *Server) Start() error {
+	router := s.setupRoutes()
+
+	s.httpServer = &http.Server{
+		Addr:         s.config.Port,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
-	userRepo := repository.NewUserRepository(pool)
-	authService := services.NewAuthService(userRepo, &logger, cfg.JWTSecret, cfg.RedisURL, cfg.NatsURL)
-	authHandler := handlers.NewAuthHandler(authService, &logger, cfg.Timeout)
+	// Start server in goroutine
+	serverErrors := make(chan error, 1)
+	go func() {
+		s.logger.Info().
+			Str("address", s.httpServer.Addr).
+			Str("environment", s.config.Environment).
+			Msg("Starting HTTP server")
 
+		serverErrors <- s.httpServer.ListenAndServe()
+	}()
+
+	// Wait for interrupt signal or server error
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("server error: %w", err)
+		}
+	case sig := <-shutdown:
+		s.logger.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
+
+		// Graceful shutdown with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			s.logger.Error().Err(err).Msg("Server forced to shutdown")
+			if err := s.httpServer.Close(); err != nil {
+				return fmt.Errorf("error closing server: %w", err)
+			}
+			return fmt.Errorf("graceful shutdown failed: %w", err)
+		}
+
+		s.logger.Info().Msg("Server stopped gracefully")
+	}
+
+	return nil
+}
+
+// setupRoutes configures all routes and middleware
+func (s *Server) setupRoutes() http.Handler {
 	r := chi.NewRouter()
 
-	// Metrics middleware
-	r.Use(func(next http.Handler) http.Handler {
+	// Global middleware (order matters)
+	r.Use(middleware.Recovery(s.logger))
+	r.Use(middleware.Logger(s.logger))
+	r.Use(middleware.CORS(s.config.AllowedOrigins))
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.RealIP)
+	r.Use(middleware.RateLimiter(s.config.RateLimitRPS, s.config.RateLimitBurst))
+	r.Use(s.metricsMiddleware())
+
+	// Health check routes (no auth required)
+	r.Get("/health", s.healthHandler.Health)
+	r.Get("/ready", s.healthHandler.Readiness)
+	r.Get("/live", s.healthHandler.Liveness)
+	r.Get("/metrics", promhttp.Handler().ServeHTTP)
+
+	// API routes
+	r.Route("/api/v1", func(r chi.Router) {
+		// Public routes
+		r.Post("/register", s.authHandler.Register)
+		r.Post("/login", s.authHandler.Login)
+
+		// Protected routes
+		r.Group(func(r chi.Router) {
+			// Require authentication
+			r.Use(middleware.AuthMiddleware(s.authService, s.logger))
+
+			// User routes
+			r.Get("/users/{id}", s.authHandler.GetProfile)
+			r.Post("/auth/refresh", s.authHandler.RefreshToken)
+
+			// Admin routes
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireRole("admin"))
+				// Add admin-only routes here
+			})
+		})
+	})
+
+	// 404 handler
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "Route not found"}`))
+	})
+
+	return r
+}
+
+// metricsMiddleware records Prometheus metrics
+func (s *Server) metricsMiddleware() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			path := r.URL.Path
 			method := r.Method
-			defer func() {
-				duration := time.Since(start).Seconds()
-				requestDuration.WithLabelValues(path, method).Observe(duration)
-				requestsTotal.WithLabelValues(path, method).Inc()
-			}()
-			next.ServeHTTP(w, r)
+
+			// Wrap response writer to capture status
+			ww := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+			// Call next handler
+			next.ServeHTTP(ww, r)
+
+			// Record metrics
+			duration := time.Since(start).Seconds()
+			status := fmt.Sprintf("%d", ww.Status())
+
+			requestDuration.WithLabelValues(path, method).Observe(duration)
+			requestsTotal.WithLabelValues(path, method, status).Inc()
 		})
-	})
-
-	r.Post("/register", authHandler.Register)
-	r.Post("/login", authHandler.Login)
-	r.Route("/users", func(r chi.Router) {
-		r.Use(middleware.AuthMiddleware(cfg.JWTSecret, &logger))
-		r.Get("/{id}", authHandler.GetProfile)
-	})
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	r.Get("/metrics", promhttp.Handler().ServeHTTP)
-
-	httpServer := &http.Server{
-		Addr:    cfg.Port,
-		Handler: r,
 	}
-
-	return &Server{httpServer: httpServer, pool: pool}
-}
-
-func (s *Server) Start() {
-	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("server failed")
-		}
-	}()
-	log.Info().Msgf("Server running on %s", s.httpServer.Addr)
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Info().Msg("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := s.httpServer.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Server forced to shutdown")
-	}
-	s.pool.Close()
-	log.Info().Msg("Server exited")
 }

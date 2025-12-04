@@ -1,334 +1,212 @@
-# User Authentication Service
+# User Authentication API
 
-A production-ready Go authentication service template with JWT authentication, PostgreSQL, Redis caching, and NATS messaging. Built with clean architecture principles and modern Go best practices.
+A production-ready authentication API built with Go, featuring JWT authentication, Redis caching, NATS messaging, and comprehensive observability.
 
-## 🚀 Features
+## Features
 
-- **JWT Authentication** - Secure token-based authentication with configurable expiry
-- **User Management** - Registration, login, and profile endpoints
-- **PostgreSQL Database** - Type-safe database queries with sqlc
-- **Redis Caching** - Fast profile lookups with automatic fallback to in-memory cache
-- **NATS Messaging** - Async event publishing (e.g., email verification)
-- **Prometheus Metrics** - Built-in monitoring and observability
-- **Rate Limiting** - IP-based rate limiting to prevent abuse
-- **CORS Support** - Configurable cross-origin resource sharing
-- **Input Validation** - Comprehensive request validation
-- **Structured Logging** - JSON logging with zerolog
-- **Docker Support** - Full containerization with docker-compose
-- **Graceful Shutdown** - Clean service termination
-- **Health Checks** - Ready-to-use health and metrics endpoints
+- 🔐 **JWT Authentication** - Secure token-based authentication
+- 👤 **User Management** - Registration, login, profile management
+- 🚀 **High Performance** - Redis caching for optimized data access
+- 📨 **Event-Driven** - NATS messaging for async operations
+- 📊 **Observability** - Prometheus metrics, structured logging
+- 🛡️ **Security** - Rate limiting, CORS, input validation
+- 🏗️ **Clean Architecture** - Separation of concerns, dependency injection
+- 🐳 **Docker Ready** - Full Docker Compose setup
+- ✅ **Production Ready** - Health checks, graceful shutdown, error handling
 
-## 📋 Prerequisites
+## Architecture
 
-- Go 1.23 or higher
+```
+cmd/api/              # Application entry point
+internal/
+├── app/              # Application initialization & DI
+├── config/           # Configuration management
+├── domain/           # Domain models and errors
+├── repository/       # Data access layer
+├── service/          # Business logic layer
+├── handler/          # HTTP handlers
+├── middleware/       # HTTP middleware
+├── cache/            # Caching abstraction
+├── messaging/        # Message broker abstraction
+└── validator/        # Input validation
+```
+
+## Prerequisites
+
+- Go 1.21+
 - Docker & Docker Compose
-- PostgreSQL 16 (or use Docker)
-- Redis 7 (or use Docker)
-- NATS 2 (or use Docker)
+- PostgreSQL 16
+- Redis 7
+- NATS 2
+- sqlc (for code generation)
+- golang-migrate (for migrations)
 
-## 🛠️ Installation
+## Quick Start
 
-### 1. Clone the Repository
+### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/nyashahama/go-scalable-auth-boilerplate.git
+git clone https://github.com/nyashahama/go-scalable-auth-boilerplate
 cd user-auth-app
-```
-
-### 2. Install Dependencies
-
-```bash
-# Install Go dependencies
-go mod download
-
-# Install development tools
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-```
-
-### 3. Setup Environment
-
-```bash
-# Generate .env file with secure JWT secret
-chmod +x setup-env.sh
-./setup-env.sh
-
-# Or manually create .env (see .env.example)
 cp .env.example .env
-# Edit .env and set your JWT_SECRET
 ```
 
-### 4. Start Services
+### 2. Generate JWT Secret
 
 ```bash
-# Option A: Use the startup script (recommended)
-chmod +x start.sh
-./start.sh
+make generate-jwt
+# Copy output to .env JWT_SECRET
+```
 
-# Option B: Manual setup
-docker-compose up -d postgres redis nats
-make migrate-up
+### 3. Start Services
+
+```bash
+# Start all services with Docker Compose
+make docker-up
+
+# View logs
+make docker-logs
+```
+
+### 4. Run Migrations
+
+```bash
+# Create migration
+make migrate-create name=create_users_table
+
+# Run migrations
+make migrate-up DB_URL="postgres://postgres:admin@localhost:5432/dbname?sslmode=disable"
+```
+
+### 5. Generate Database Code
+
+```bash
 make sqlc
 ```
 
-### 5. Run the Application
+### 6. Build and Run
 
 ```bash
-# Development mode
+# Build binary
+make build
+
+# Run application
 make run
 
-# Or build and run
-make build
-./bin/api
-
-# Or with Docker
-docker-compose up -d
+# Or run with Docker
+make docker-build
 ```
 
-The server will start on `http://localhost:8080`
-
-## 🔧 Configuration
-
-All configuration is done via environment variables in `.env`:
-
-| Variable           | Description                              | Default               |
-| ------------------ | ---------------------------------------- | --------------------- |
-| `DB_URL`           | PostgreSQL connection string             | Required              |
-| `JWT_SECRET`       | Secret key for JWT signing               | Required              |
-| `JWT_EXPIRY_HOURS` | JWT token expiry time                    | 24                    |
-| `PORT`             | Server port                              | 8080                  |
-| `LOG_LEVEL`        | Logging level (debug, info, warn, error) | info                  |
-| `ENVIRONMENT`      | Environment (development, production)    | development           |
-| `TIMEOUT_SECONDS`  | Request timeout                          | 30                    |
-| `REDIS_URL`        | Redis connection string                  | localhost:6379        |
-| `NATS_URL`         | NATS connection string                   | nats://localhost:4222 |
-| `ALLOWED_ORIGINS`  | CORS allowed origins (comma-separated)   | \*                    |
-| `RATE_LIMIT_RPS`   | Rate limit requests per second           | 10                    |
-| `RATE_LIMIT_BURST` | Rate limit burst size                    | 20                    |
-
-### Generate Secure JWT Secret
-
-```bash
-# Generate a 32-byte base64 encoded secret
-openssl rand -base64 32
-
-# Or use the makefile
-make generate-jwt
-```
-
-## 📚 API Documentation
+## API Endpoints
 
 ### Public Endpoints
-
-#### Health Check
-
-```bash
-GET /health
-```
 
 #### Register User
 
 ```bash
-POST /register
+POST /api/v1/register
 Content-Type: application/json
 
 {
   "username": "johndoe",
   "email": "john@example.com",
-  "password": "secure_password123",
+  "password": "securepassword123",
   "role": "user"
-}
-```
-
-**Response:**
-
-```json
-{
-  "id": 1,
-  "username": "johndoe",
-  "email": "john@example.com",
-  "role": "user",
-  "created_at": "2025-12-02T10:30:00Z"
 }
 ```
 
 #### Login
 
 ```bash
-POST /login
+POST /api/v1/login
 Content-Type: application/json
 
 {
   "email": "john@example.com",
-  "password": "secure_password123"
+  "password": "securepassword123"
 }
 ```
 
-**Response:**
-
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-### Protected Endpoints
+### Protected Endpoints (Require Bearer Token)
 
 #### Get User Profile
 
 ```bash
-GET /users/{id}
-Authorization: Bearer {token}
+GET /api/v1/users/{id}
+Authorization: Bearer <token>
 ```
 
-**Response:**
-
-```json
-{
-  "id": 1,
-  "username": "johndoe",
-  "email": "john@example.com",
-  "role": "user",
-  "created_at": "2025-12-02T10:30:00Z"
-}
-```
-
-### Monitoring Endpoints
-
-#### Prometheus Metrics
+#### Refresh Token
 
 ```bash
-GET /metrics
+POST /api/v1/auth/refresh
+Authorization: Bearer <token>
 ```
 
-## 🧪 Testing
+### Health & Monitoring
 
-### Run Tests
+```bash
+GET /health      # Comprehensive health check
+GET /ready       # Readiness probe
+GET /live        # Liveness probe
+GET /metrics     # Prometheus metrics
+```
+
+## Configuration
+
+All configuration is done via environment variables. See `.env.example` for all available options.
+
+### Key Configuration Options
+
+| Variable           | Description                                    | Default                |
+| ------------------ | ---------------------------------------------- | ---------------------- |
+| `DB_URL`           | PostgreSQL connection string                   | Required               |
+| `JWT_SECRET`       | JWT signing secret (min 32 chars)              | Required               |
+| `JWT_EXPIRY_HOURS` | Token expiration time                          | 24                     |
+| `PORT`             | Server port                                    | 8080                   |
+| `LOG_LEVEL`        | Logging level (debug, info, warn, error)       | info                   |
+| `ENVIRONMENT`      | Environment (development, staging, production) | development            |
+| `REDIS_URL`        | Redis connection string                        | redis://localhost:6379 |
+| `NATS_URL`         | NATS connection string                         | nats://localhost:4222  |
+| `RATE_LIMIT_RPS`   | Requests per second limit                      | 10                     |
+| `ALLOWED_ORIGINS`  | CORS allowed origins                           | \*                     |
+
+## Development
+
+### Project Structure
+
+The project follows clean architecture principles:
+
+- **Domain Layer**: Business entities and errors
+- **Repository Layer**: Data access with interfaces
+- **Service Layer**: Business logic
+- **Handler Layer**: HTTP request handling
+- **Infrastructure**: External services (cache, messaging)
+
+### Key Design Patterns
+
+1. **Dependency Injection**: All dependencies injected via constructors
+2. **Interface Segregation**: Small, focused interfaces
+3. **Repository Pattern**: Data access abstraction
+4. **Service Layer**: Business logic separation
+5. **Middleware Chain**: Composable HTTP middleware
+6. **Error Handling**: Domain-specific errors with HTTP mapping
+
+### Running Tests
 
 ```bash
 # Run all tests
 make test
 
-# Run with coverage
-make test
-
 # Run integration tests
 make test-integration
 
-# View coverage report
+# View coverage
+make test
 open coverage.html
 ```
 
-### Manual API Testing
-
-Use the provided test script:
-
-```bash
-chmod +x test-api.sh
-./test-api.sh
-```
-
-Or use curl:
-
-```bash
-# Register
-curl -X POST http://localhost:8080/register \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","email":"test@example.com","password":"password123","role":"user"}'
-
-# Login
-TOKEN=$(curl -X POST http://localhost:8080/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","password":"password123"}' | jq -r '.token')
-
-# Get profile
-curl http://localhost:8080/users/1 \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-## 🗂️ Project Structure
-
-```
-user-auth-app/
-├── cmd/
-│   └── api/
-│       └── main.go              # Application entry point
-├── internal/
-│   ├── config/                  # Configuration management
-│   ├── domain/                  # Domain models
-│   ├── handlers/                # HTTP handlers
-│   ├── middleware/              # HTTP middleware (auth, CORS, rate limit)
-│   ├── repository/              # Data access layer
-│   │   ├── sqlc/               # Generated database code
-│   │   ├── schema.sql          # Database schema
-│   │   └── queries.sql         # SQL queries
-│   ├── services/                # Business logic
-│   └── validator/               # Input validation
-├── migrations/                  # Database migrations
-├── scripts/                     # Utility scripts
-├── .env.example                 # Example environment config
-├── docker-compose.yml           # Docker services configuration
-├── Dockerfile                   # Application container
-├── Makefile                     # Common tasks
-├── sqlc.yaml                    # sqlc configuration
-└── README.md
-```
-
-## 🐳 Docker Usage
-
-### Using Docker Compose
-
-```bash
-# Start all services (Postgres, Redis, NATS, API)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-
-# Rebuild API container
-docker-compose build api
-docker-compose up -d api
-```
-
-### Individual Services
-
-```bash
-# Start only infrastructure services
-docker-compose up -d postgres redis nats
-
-# Then run the API locally for development
-make run
-```
-
-## 📊 Database Migrations
-
-### Create Migration
-
-```bash
-make migrate-create name=add_users_table
-```
-
-### Run Migrations
-
-```bash
-# Migrate up
-make migrate-up
-
-# Migrate down
-make migrate-down
-```
-
-### Generate sqlc Code
-
-```bash
-make sqlc
-```
-
-## 🔍 Common Tasks
+### Code Quality
 
 ```bash
 # Format code
@@ -339,111 +217,167 @@ make lint
 
 # Tidy dependencies
 make tidy
-
-# Clean build artifacts
-make clean
-
-# Build binary
-make build
-
-# Run application
-make run
-
-# Generate JWT secret
-make generate-jwt
 ```
 
-## 🚀 Production Deployment
+## Database Migrations
 
-### Environment Variables
-
-Ensure these are set in production:
-
-- `ENVIRONMENT=production`
-- `LOG_LEVEL=info`
-- Strong `JWT_SECRET` (32+ bytes)
-- Proper `ALLOWED_ORIGINS`
-- Database connection with SSL: `?sslmode=require`
-
-### Docker Deployment
+### Create Migration
 
 ```bash
-# Build for production
+make migrate-create name=add_email_verification
+```
+
+### Run Migrations
+
+```bash
+make migrate-up
+```
+
+### Rollback Migrations
+
+```bash
+make migrate-down
+```
+
+## Monitoring & Observability
+
+### Prometheus Metrics
+
+Available at `/metrics`:
+
+- HTTP request duration histograms
+- HTTP request counters (by path, method, status)
+- Database query duration
+- Database query counters (by operation, status)
+
+### Structured Logging
+
+All logs are structured JSON (in production) or console (in development):
+
+```json
+{
+  "level": "info",
+  "time": "2025-01-01T12:00:00Z",
+  "message": "request completed",
+  "method": "POST",
+  "path": "/api/v1/login",
+  "status": 200,
+  "duration": 45.2
+}
+```
+
+### Health Checks
+
+- `/health` - Checks all dependencies (DB, Redis, NATS)
+- `/ready` - Kubernetes readiness probe
+- `/live` - Kubernetes liveness probe
+
+## Production Deployment
+
+### Docker
+
+```bash
+# Build image
 docker build -t user-auth-app:latest .
 
-# Run with production config
-docker run -d \
-  --name user-auth-app \
-  -p 8080:8080 \
-  --env-file .env.production \
+# Run container
+docker run -p 8080:8080 \
+  -e DB_URL="..." \
+  -e JWT_SECRET="..." \
   user-auth-app:latest
 ```
 
 ### Kubernetes
 
-Coming soon! Check the `k8s/` directory for Kubernetes manifests.
+See `k8s/` directory for Kubernetes manifests (deployment, service, ingress, configmap).
 
-## 🔒 Security Best Practices
+### Environment-Specific Configuration
 
+1. **Development**: Uses console logging, relaxed CORS
+2. **Staging**: JSON logging, stricter rate limits
+3. **Production**: JSON logging, strict CORS, enhanced security
+
+## Security Considerations
+
+- ✅ Passwords hashed with bcrypt
 - ✅ JWT tokens with expiration
-- ✅ Password hashing with bcrypt
-- ✅ Rate limiting on all endpoints
-- ✅ Input validation and sanitization
-- ✅ CORS configuration
-- ✅ SQL injection prevention (sqlc)
+- ✅ Rate limiting per IP
+- ✅ CORS protection
+- ✅ Input validation
+- ✅ SQL injection protection (via sqlc)
+- ✅ Panic recovery middleware
 - ✅ Secure headers
-- ✅ Environment-based secrets
 
-**⚠️ Production Checklist:**
+## Performance Features
 
-- [ ] Use strong JWT secret (32+ bytes)
-- [ ] Enable HTTPS/TLS
-- [ ] Configure proper CORS origins
-- [ ] Set up database backups
-- [ ] Monitor logs and metrics
-- [ ] Implement request logging
-- [ ] Add rate limiting per user
-- [ ] Set up alerting
+- Redis caching with fallback to in-memory
+- Connection pooling for PostgreSQL
+- Efficient database queries via sqlc
+- Request timeout handling
+- Graceful shutdown
+- Prometheus metrics for monitoring
 
-## 🤝 Contributing
+## Troubleshooting
+
+### Database Connection Issues
+
+```bash
+# Check database is running
+docker ps | grep postgres
+
+# Test connection
+psql -h localhost -U postgres -d dbname
+```
+
+### Redis Issues
+
+```bash
+# Check Redis
+docker ps | grep redis
+
+# Test connection
+redis-cli -h localhost ping
+```
+
+### Port Already in Use
+
+```bash
+# Find process using port 8080
+lsof -i :8080
+
+# Kill process
+kill -9 <PID>
+```
+
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Run `make lint` and `make test`
+6. Submit a pull request
 
-## 📝 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see LICENSE file for details
 
-## 🙏 Acknowledgments
-
-- [sqlc](https://github.com/sqlc-dev/sqlc) - Type-safe SQL in Go
-- [chi](https://github.com/go-chi/chi) - Lightweight HTTP router
-- [zerolog](https://github.com/rs/zerolog) - Zero-allocation JSON logger
-- [pgx](https://github.com/jackc/pgx) - PostgreSQL driver
-- [jwt-go](https://github.com/golang-jwt/jwt) - JWT implementation
-
-## 📧 Support
+## Support
 
 For issues and questions:
 
-- 🐛 [Report bugs](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
-- 💡 [Request features](https://github.com/nyashahama/go-scalable-auth-boilerplate/issues)
-- 📖 [Documentation](https://github.com/nyashahama/go-scalable-auth-boilerplate/wiki)
+- Create an issue on GitHub
+- Check existing documentation
+- Review API examples
 
-## 🗺️ Roadmap
+## Roadmap
 
-- [ ] Refresh token support
-- [ ] Email verification implementation
+- [ ] OAuth2 integration
+- [ ] Email verification
 - [ ] Password reset flow
-- [ ] OAuth2 integration (Google, GitHub)
-- [ ] Role-based access control (RBAC)
-- [ ] Two-factor authentication (2FA)
-- [ ] API versioning
+- [ ] 2FA support
+- [ ] API rate limiting per user
+- [ ] Request ID tracing
+- [ ] OpenAPI/Swagger documentation
 - [ ] GraphQL support
-- [ ] WebSocket support
-- [ ] Admin dashboard
-
----
+- [ ] Websocket support

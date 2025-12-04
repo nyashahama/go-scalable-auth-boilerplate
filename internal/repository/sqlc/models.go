@@ -8,11 +8,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuditLog struct {
+	ID        int32            `json:"id"`
+	UserID    pgtype.Int4      `json:"user_id"`
+	Action    string           `json:"action"`
+	Resource  pgtype.Text      `json:"resource"`
+	Details   []byte           `json:"details"`
+	IpAddress pgtype.Text      `json:"ip_address"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+type Session struct {
+	ID        string           `json:"id"`
+	UserID    int32            `json:"user_id"`
+	TokenHash string           `json:"token_hash"`
+	ExpiresAt pgtype.Timestamp `json:"expires_at"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	IpAddress pgtype.Text      `json:"ip_address"`
+	UserAgent pgtype.Text      `json:"user_agent"`
+}
+
 type User struct {
-	ID           int32            `json:"id"`
-	Username     string           `json:"username"`
-	Email        string           `json:"email"`
-	PasswordHash string           `json:"password_hash"`
-	Role         string           `json:"role"`
-	CreatedAt    pgtype.Timestamp `json:"created_at"`
+	ID            int32            `json:"id"`
+	Username      string           `json:"username"`
+	Email         string           `json:"email"`
+	PasswordHash  string           `json:"password_hash"`
+	Role          string           `json:"role"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	LastLogin     pgtype.Timestamp `json:"last_login"`
+	IsActive      bool             `json:"is_active"`
+	EmailVerified bool             `json:"email_verified"`
 }

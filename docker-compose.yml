@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   postgres:
-    image: postgres:16 #Debian 12
+    image: postgres:16-alpine
     container_name: auth_postgres
     environment:
       POSTGRES_USER: postgres
@@ -17,56 +17,73 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - auth_network
 
   redis:
-    image: redis:7 #Debian 12
+    image: redis:7-alpine
     container_name: auth_redis
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - auth_network
 
   nats:
-    image: nats:2 #Debain 12
+    image: nats:2-alpine
     container_name: auth_nats
+    command: ["-js", "-m", "8222"]
     ports:
       - "4222:4222"
-      - "8222:8222" # HTTP monitoring
+      - "8222:8222"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - auth_network
 
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: auth_api
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_healthy
+      - postgres
+      - redis
+      - nats
     ports:
       - "8080:8080"
     environment:
       DB_URL: postgres://postgres:admin@postgres:5432/dbname?sslmode=disable
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars-long-please-update-this}
       PORT: 8080
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       TIMEOUT_SECONDS: 30
       REDIS_URL: redis://redis:6379
       NATS_URL: nats://nats:4222
-      ENVIRONMENT: development
-      ALLOWED_ORIGINS: "*"
-      RATE_LIMIT_RPS: 10
-      RATE_LIMIT_BURST: 20
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-20}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
+      CACHE_TTL_MINUTES: ${CACHE_TTL_MINUTES:-5}
     restart: unless-stopped
+    networks:
+      - auth_network
 
+networks:
+  auth_network:
+    driver: bridge
 
 volumes:
   postgres_data:
+  redis_data:
