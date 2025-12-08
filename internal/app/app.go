@@ -7,6 +7,7 @@ import (
 
 	"user-auth-app/internal/cache"
 	"user-auth-app/internal/config"
+	"user-auth-app/internal/email"
 	"user-auth-app/internal/handler"
 	"user-auth-app/internal/messaging"
 	"user-auth-app/internal/repository"
@@ -45,6 +46,13 @@ func New(cfg *config.Config) (*App, error) {
 		// Don't return error, broker is optional
 	}
 
+	// Initialize email service
+	emailService, err := email.NewFromEnv(logger)
+	if err != nil {
+		logger.Warn().Err(err).Msg("Email service initialization failed, continuing without email")
+		// Don't return error, email is optional
+	}
+
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(pool)
 	_ = repository.NewTxManager(pool) // Transaction manager available if needed
@@ -54,6 +62,7 @@ func New(cfg *config.Config) (*App, error) {
 		userRepo,
 		cacheService,
 		broker,
+		emailService,
 		logger,
 		cfg.JWTSecret,
 		cfg.JWTExpiry,
@@ -62,7 +71,7 @@ func New(cfg *config.Config) (*App, error) {
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService, userService, logger, cfg.Timeout)
-	healthHandler := handler.NewHealthHandler(pool, cacheService, broker)
+	healthHandler := handler.NewHealthHandler(pool, cacheService, broker, emailService)
 
 	// Initialize server
 	srv := server.NewServer(cfg, logger, authHandler, healthHandler, authService)

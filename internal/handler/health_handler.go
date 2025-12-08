@@ -8,15 +8,17 @@ import (
 	"time"
 
 	"user-auth-app/internal/cache"
+	"user-auth-app/internal/email"
 	"user-auth-app/internal/messaging"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type HealthHandler struct {
-	pool   *pgxpool.Pool
-	cache  cache.Service
-	broker messaging.Broker
+	pool         *pgxpool.Pool
+	cache        cache.Service
+	broker       messaging.Broker
+	emailService email.Service
 }
 
 type HealthResponse struct {
@@ -27,11 +29,12 @@ type HealthResponse struct {
 }
 
 // NewHealthHandler creates a new health handler
-func NewHealthHandler(pool *pgxpool.Pool, cache cache.Service, broker messaging.Broker) *HealthHandler {
+func NewHealthHandler(pool *pgxpool.Pool, cache cache.Service, broker messaging.Broker, emailService email.Service) *HealthHandler {
 	return &HealthHandler{
-		pool:   pool,
-		cache:  cache,
-		broker: broker,
+		pool:         pool,
+		cache:        cache,
+		broker:       broker,
+		emailService: emailService,
 	}
 }
 
@@ -72,6 +75,14 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 			services["messaging"] = "healthy"
 		} else {
 			services["messaging"] = "unavailable"
+		}
+	}
+
+	if h.emailService != nil {
+		if h.emailService.IsAvailable() {
+			services["email"] = "healthy"
+		} else {
+			services["email"] = "degraded"
 		}
 	}
 

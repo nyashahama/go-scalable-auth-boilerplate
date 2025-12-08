@@ -9,6 +9,7 @@ import (
 
 	"user-auth-app/internal/cache"
 	"user-auth-app/internal/domain"
+	"user-auth-app/internal/email"
 	"user-auth-app/internal/messaging"
 	"user-auth-app/internal/repository"
 
@@ -18,12 +19,13 @@ import (
 )
 
 type authService struct {
-	repo      repository.UserRepository
-	cache     cache.Service
-	broker    messaging.Broker
-	logger    *zerolog.Logger
-	jwtSecret string
-	jwtExpiry time.Duration
+	repo         repository.UserRepository
+	cache        cache.Service
+	broker       messaging.Broker
+	emailService email.Service
+	logger       *zerolog.Logger
+	jwtSecret    string
+	jwtExpiry    time.Duration
 }
 
 // NewAuthService creates a new authentication service
@@ -31,17 +33,19 @@ func NewAuthService(
 	repo repository.UserRepository,
 	cache cache.Service,
 	broker messaging.Broker,
+	emailService email.Service,
 	logger *zerolog.Logger,
 	jwtSecret string,
 	jwtExpiry time.Duration,
 ) AuthService {
 	return &authService{
-		repo:      repo,
-		cache:     cache,
-		broker:    broker,
-		logger:    logger,
-		jwtSecret: jwtSecret,
-		jwtExpiry: jwtExpiry,
+		repo:         repo,
+		cache:        cache,
+		broker:       broker,
+		emailService: emailService,
+		logger:       logger,
+		jwtSecret:    jwtSecret,
+		jwtExpiry:    jwtExpiry,
 	}
 }
 
@@ -79,6 +83,20 @@ func (s *authService) Register(ctx context.Context, username, email, password, r
 		return domain.User{}, fmt.Errorf("user creation failed: %w", err)
 	}
 
+	// Send welcome email asynchronously
+	if s.emailService != nil && s.emailService.IsAvailable() {
+		go func() {
+			emailCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := s.emailService.SendWelcomeEmail(emailCtx, created.Email, created.Username); err != nil {
+				s.logger.Error().Err(err).Str("email", created.Email).Msg("Failed to send welcome email")
+			} else {
+				s.logger.Info().Str("email", created.Email).Msg("Welcome email sent")
+			}
+		}()
+	}
+
 	// Publish user registration event
 	if s.broker != nil && s.broker.IsAvailable() {
 		event := map[string]interface{}{
@@ -89,7 +107,6 @@ func (s *authService) Register(ctx context.Context, username, email, password, r
 		}
 		if err := s.broker.PublishJSON("user.registered", event); err != nil {
 			s.logger.Error().Err(err).Msg("Failed to publish registration event")
-			// Don't fail the registration if event publishing fails
 		}
 	}
 
@@ -126,6 +143,22 @@ func (s *authService) Login(ctx context.Context, email, password string) (string
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to generate token")
 		return "", time.Time{}, fmt.Errorf("token generation failed: %w", err)
+	}
+
+	// Send login alert email asynchronously (optional security feature)
+	if s.emailService != nil && s.emailService.IsAvailable() {
+		go func() {
+			emailCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			// You could extract IP and location from context if available
+			ipAddress := "Unknown"
+			location := "Unknown"
+
+			if err := s.emailService.SendLoginAlertEmail(emailCtx, user.Email, user.Username, ipAddress, location); err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to send login alert email")
+			}
+		}()
 	}
 
 	s.logger.Info().
