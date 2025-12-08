@@ -144,7 +144,6 @@ func (s *authService) ValidateToken(ctx context.Context, tokenString string) (*T
 		}
 		return []byte(s.jwtSecret), nil
 	})
-
 	if err != nil {
 		return nil, domain.ErrInvalidToken
 	}

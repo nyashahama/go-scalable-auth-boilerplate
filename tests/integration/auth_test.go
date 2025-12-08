@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
 	"user-auth-app/internal/app"
 	"user-auth-app/internal/config"
 	"user-auth-app/internal/handler/dto"
